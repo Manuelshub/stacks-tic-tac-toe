@@ -19,7 +19,7 @@ export function GamesList({ games }: { games: Game[] }) {
       (game) =>
         (game["player-one"] === userAddress ||
           game["player-two"] === userAddress) &&
-        game.winner === null
+        game.winner === null && !game.isDraw
     );
     return filteredGames;
   }, [userData, games]);
@@ -33,14 +33,15 @@ export function GamesList({ games }: { games: Game[] }) {
     return games.filter(
       (game) =>
         game.winner === null &&
+        !game.isDraw &&
         game["player-one"] !== userAddress &&
         game["player-two"] === null
     );
   }, [games, userData]);
 
-  // Ended games are games in which the winner has been decided
+  // Ended games are games in which the winner has been decided or it's a draw
   const endedGames = useMemo(() => {
-    return games.filter((game) => game.winner !== null);
+    return games.filter((game) => game.winner !== null || game.isDraw);
   }, [games]);
 
   return (
@@ -156,7 +157,7 @@ export function GamesList({ games }: { games: Game[] }) {
                   {formatStx(game["bet-amount"])} STX
                 </div>
                 <div className="text-md px-1 py-0.5 bg-gray-800 rounded text-center w-full">
-                  Winner: {game["is-player-one-turn"] ? "O" : "X"}
+                  {game.isDraw ? "Draw" : `Winner: ${game.winner === game["player-one"] ? "X" : "O"}`}
                 </div>
               </Link>
             ))}
