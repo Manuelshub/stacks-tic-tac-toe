@@ -8,6 +8,17 @@
 ;; The Game ID to use for the next game
 (define-data-var latest-game-id uint u0)
 
+;; Player statistics map to track wins, losses, and draws
+(define-map player-stats
+    principal ;; Key (Player address)
+    { ;; Value (Stats tuple)
+        wins: uint,
+        losses: uint,
+        draws: uint,
+        total-games: uint
+    }
+)
+
 (define-map games 
     uint ;; Key (Game ID)
     { ;; Value (Game Tuple)
@@ -115,12 +126,16 @@
         (game-board (unwrap! (replace-at? original-board move-index move) (err ERR_INVALID_MOVE)))
         ;; Check if the game has been won now with this modified board
         (is-now-winner (has-won game-board))
+        ;; Check if the board is full (potential draw)
+        (is-board-full-now (is-board-full game-board))
+        ;; Determine if game is over (win or draw)
+        (is-game-over (or is-now-winner is-board-full-now))
         ;; Merge the game data with the updated board and marking the next turn to be player two's turn
-        ;; Also mark the winner if the game has been won
+        ;; Also mark the winner if the game has been won, or mark as draw if board is full
         (game-data (merge original-game-data {
             board: game-board,
             is-player-one-turn: (not is-player-one-turn),
-            winner: (if is-now-winner (some player-turn) none)
+            winner: (if is-now-winner (some player-turn) (if is-board-full-now (some THIS_CONTRACT) none))
         }))
     )
 
@@ -131,8 +146,33 @@
     ;; Ensure that the move meets validity requirements
     (asserts! (validate-move original-board move-index move) (err ERR_INVALID_MOVE))
 
-    ;; if the game has been won, transfer the (bet amount * 2 = both players bets) STX to the winner
-    (if is-now-winner (try! (as-contract (stx-transfer? (* u2 (get bet-amount game-data)) tx-sender player-turn))) false)
+    ;; Handle game ending: if won, transfer all STX to winner; if draw, refund both players
+    ;; Also update player statistics
+    (if is-now-winner 
+        (begin
+            (try! (as-contract (stx-transfer? (* u2 (get bet-amount game-data)) tx-sender player-turn)))
+            ;; Update winner stats
+            (update-player-stats player-turn "win")
+            ;; Update loser stats
+            (update-player-stats 
+                (if (is-eq player-turn (get player-one game-data)) 
+                    (unwrap-panic (get player-two game-data))
+                    (get player-one game-data)
+                ) 
+                "loss"
+            )
+        )
+        (if is-board-full-now
+            (begin
+                (try! (as-contract (stx-transfer? (get bet-amount game-data) tx-sender (get player-one game-data))))
+                (try! (as-contract (stx-transfer? (get bet-amount game-data) tx-sender (unwrap-panic (get player-two game-data)))))
+                ;; Update both players' draw stats
+                (update-player-stats (get player-one game-data) "draw")
+                (update-player-stats (unwrap-panic (get player-two game-data)) "draw")
+            )
+            false
+        )
+    )
 
     ;; Update the games map with the new game data
     (map-set games game-id game-data)
@@ -181,6 +221,21 @@
     )
 )
 
+;; Check if the board is full (no empty cells remaining)
+(define-private (is-board-full (board (list 9 uint)))
+    (and 
+        (not (is-eq (unwrap-panic (element-at? board u0)) u0))
+        (not (is-eq (unwrap-panic (element-at? board u1)) u0))
+        (not (is-eq (unwrap-panic (element-at? board u2)) u0))
+        (not (is-eq (unwrap-panic (element-at? board u3)) u0))
+        (not (is-eq (unwrap-panic (element-at? board u4)) u0))
+        (not (is-eq (unwrap-panic (element-at? board u5)) u0))
+        (not (is-eq (unwrap-panic (element-at? board u6)) u0))
+        (not (is-eq (unwrap-panic (element-at? board u7)) u0))
+        (not (is-eq (unwrap-panic (element-at? board u8)) u0))
+    )
+)
+
 ;; Given a board and three cells to look at on the board
 ;; Return true if all three are not empty and are the same value (all X or all O)
 ;; Return false if any of the three is empty or a different value
@@ -197,3 +252,42 @@
     ;; a-val must equal b-val and must also equal c-val while not being empty (non-zero)
     (and (is-eq a-val b-val) (is-eq a-val c-val) (not (is-eq a-val u0)))
 ))
+
+;; Update player statistics when a game ends
+(define-private (update-player-stats (player principal) (result (string-ascii 10)))
+    (let (
+        ;; Get current stats or use defaults
+        (current-stats (default-to 
+            {wins: u0, losses: u0, draws: u0, total-games: u0}
+            (map-get? player-stats player)
+        ))
+        ;; Calculate new stats based on result
+        (new-stats (if (is-eq result "win")
+            (merge current-stats {
+                wins: (+ (get wins current-stats) u1),
+                total-games: (+ (get total-games current-stats) u1)
+            })
+            (if (is-eq result "loss")
+                (merge current-stats {
+                    losses: (+ (get losses current-stats) u1),
+                    total-games: (+ (get total-games current-stats) u1)
+                })
+                (merge current-stats {
+                    draws: (+ (get draws current-stats) u1),
+                    total-games: (+ (get total-games current-stats) u1)
+                })
+            )
+        ))
+    )
+    ;; Update the player stats map
+    (map-set player-stats player new-stats)
+    true
+))
+
+;; Read-only function to get player statistics
+(define-read-only (get-player-stats (player principal))
+    (default-to 
+        {wins: u0, losses: u0, draws: u0, total-games: u0}
+        (map-get? player-stats player)
+    )
+)
