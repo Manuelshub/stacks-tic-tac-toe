@@ -28,7 +28,7 @@ export function PlayGame({ game }: PlayGameProps) {
   const isMyTurn =
     (game["is-player-one-turn"] && isPlayerOne) ||
     (!game["is-player-one-turn"] && isPlayerTwo);
-  const isGameOver = game.winner !== null;
+  const isGameOver = game.winner !== null || game.isDraw;
 
   function onCellClick(index: number) {
     const tempBoard = [...game.board];
@@ -78,7 +78,12 @@ export function PlayGame({ game }: PlayGameProps) {
           )}
         </div>
 
-        {game["winner"] && (
+        {game.isDraw ? (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-gray-500">Result: </span>
+            <span className="text-yellow-500 font-bold">Draw - Both players refunded</span>
+          </div>
+        ) : game["winner"] ? (
           <div className="flex items-center justify-between gap-2">
             <span className="text-gray-500">Winner: </span>
             <Link
@@ -89,7 +94,7 @@ export function PlayGame({ game }: PlayGameProps) {
               {abbreviateAddress(game["winner"])}
             </Link>
           </div>
-        )}
+        ) : null}
       </div>
 
       {isJoinable && (

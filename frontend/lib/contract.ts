@@ -6,6 +6,7 @@ import {
   ListCV,
   OptionalCV,
   PrincipalCV,
+  principalCV,
   TupleCV,
   uintCV,
   UIntCV,
@@ -31,6 +32,7 @@ export type Game = {
   "bet-amount": number;
   board: number[];
   winner: string | null;
+  isDraw?: boolean; // Add flag to indicate if the game is a draw
 };
 
 export enum Move {
@@ -94,6 +96,11 @@ export async function getGame(gameId: number) {
   // If we got back a GameCV tuple, we can convert it to a Game object
   const gameCV = responseCV.value.value;
 
+  // Check if the winner is the contract address (indicates a draw)
+  const winner = gameCV["winner"].type === "some" ? gameCV["winner"].value.value : null;
+  const contractAddressWithContract = `${CONTRACT_ADDRESS}.${CONTRACT_NAME}`;
+  const isDraw = winner === contractAddressWithContract;
+
   const game: Game = {
     id: gameId,
     "player-one": gameCV["player-one"].value,
@@ -104,8 +111,8 @@ export async function getGame(gameId: number) {
     "is-player-one-turn": cvToValue(gameCV["is-player-one-turn"]),
     "bet-amount": parseInt(gameCV["bet-amount"].value.toString()),
     board: gameCV["board"].value.map((cell) => parseInt(cell.value.toString())),
-    winner:
-      gameCV["winner"].type === "some" ? gameCV["winner"].value.value : null,
+    winner: isDraw ? null : winner, // Set winner to null for draws
+    isDraw: isDraw,
   };
   return game;
 }
@@ -145,4 +152,24 @@ export async function play(gameId: number, moveIndex: number, move: Move) {
   };
 
   return txOptions;
+}
+
+export async function getPlayerStats(playerAddress: string) {
+  const statsCV = await fetchCallReadOnlyFunction({
+    contractAddress: CONTRACT_ADDRESS,
+    contractName: CONTRACT_NAME,
+    functionName: "get-player-stats",
+    functionArgs: [principalCV(playerAddress)],
+    senderAddress: CONTRACT_ADDRESS,
+    network: STACKS_TESTNET,
+  });
+
+  // Convert the CV tuple to a JavaScript object
+  const statsTuple = statsCV as TupleCV;
+  return {
+    wins: parseInt((statsTuple.value.wins as UIntCV).value.toString()),
+    losses: parseInt((statsTuple.value.losses as UIntCV).value.toString()),
+    draws: parseInt((statsTuple.value.draws as UIntCV).value.toString()),
+    "total-games": parseInt((statsTuple.value["total-games"] as UIntCV).value.toString()),
+  };
 }
